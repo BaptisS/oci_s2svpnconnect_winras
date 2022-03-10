@@ -1,0 +1,75 @@
+$VPNConnect01 = 'a.b.c.d'
+$VpnS2SInterfaceName = 'Tunnel01'
+$IPv4Subnet = @("10.200.101.0/24:100")
+$SharedSecret = 'abcd'
+
+Function Invoke-WindowsApi(
+[string] $dllName,
+[Type] $returnType,
+[string] $methodName,
+[Type[]] $parameterTypes,
+[Object[]] $parameters
+)
+{
+## Begin to build the dynamic assembly
+$domain = [AppDomain]::CurrentDomain
+$name = New-Object Reflection.AssemblyName 'PInvokeAssembly'
+$assembly = $domain.DefineDynamicAssembly($name, 'Run')
+$module = $assembly.DefineDynamicModule('PInvokeModule')
+$type = $module.DefineType('PInvokeType', "Public,BeforeFieldInit")
+ 
+$inputParameters = @()
+ 
+for($counter = 1; $counter -le $parameterTypes.Length; $counter++)
+{
+$inputParameters += $parameters[$counter - 1]
+}
+ 
+$method = $type.DefineMethod($methodName, 'Public,HideBySig,Static,PinvokeImpl',$returnType, $parameterTypes)
+ 
+## Apply the P/Invoke constructor
+$ctor = [Runtime.InteropServices.DllImportAttribute].GetConstructor([string])
+$attr = New-Object Reflection.Emit.CustomAttributeBuilder $ctor, $dllName
+$method.SetCustomAttribute($attr)
+ 
+## Create the temporary type, and invoke the method.
+$realType = $type.CreateType()
+ 
+$ret = $realType.InvokeMember($methodName, 'Public,Static,InvokeMethod', $null, $null, $inputParameters)
+ 
+return $ret
+}
+ 
+Function Set-PrivateProfileString(
+$file,
+$category,
+$key,
+$value)
+{
+## Prepare the parameter types and parameter values for the Invoke-WindowsApi script
+$parameterTypes = [string], [string], [string], [string]
+$parameters = [string] $category, [string] $key, [string] $value, [string] $file
+ 
+## Invoke the API
+[void] (Invoke-WindowsApi "kernel32.dll" ([UInt32]) "WritePrivateProfileString" $parameterTypes $parameters)
+}
+ 
+
+
+### Add and configure S2S VPN interface
+Add-VpnS2SInterface -Protocol IKEv2 -AuthenticationMethod PSKOnly -NumberOfTries 3 -ResponderAuthenticationMethod PSKOnly -Name $VpnS2SInterfaceName -Destination $VPNConnect01 -IPv4Subnet $IPv4Subnet -SharedSecret $SharedSecret
+Set-VpnServerIPsecConfiguration -EncryptionType MaximumEncryption
+Set-VpnS2Sinterface -Name $VpnS2SInterfaceName -InitiateConfigPayload $false -Force
+ 
+### Set S2S VPN connection to be persistent by editing the router.pbk file (required admin priveleges)
+Set-PrivateProfileString $env:windir\System32\ras\router.pbk $VpnS2SInterfaceName "IdleDisconnectSeconds" "0"
+Set-PrivateProfileString $env:windir\System32\ras\router.pbk $VpnS2SInterfaceName "RedialOnLinkFailure" "1"
+ 
+### Restart the RRAS service
+Restart-Service RemoteAccess
+
+Set-VpnS2SInterface -CustomPolicy -Name $VpnS2SInterfaceName -AuthenticationMethod PSKOnly -AuthenticationTransformConstants SHA256 -CipherTransformConstants AES256 -DHGroup Group2 -EncryptionMethod AES256 -IntegrityCheckMethod SHA256 -PfsGroup PFS2 -ResponderAuthenticationMethod PSKOnly
+
+ 
+### Dial-in to Azure gateway
+Connect-VpnS2SInterface -Name $VpnS2SInterfaceName 
