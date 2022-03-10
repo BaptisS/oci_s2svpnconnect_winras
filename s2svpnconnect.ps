@@ -64,11 +64,11 @@ Set-VpnS2Sinterface -Name $VpnS2SInterfaceName -InitiateConfigPayload $false -Fo
 ### Set S2S VPN connection to be persistent by editing the router.pbk file (required admin priveleges)
 Set-PrivateProfileString $env:windir\System32\ras\router.pbk $VpnS2SInterfaceName "IdleDisconnectSeconds" "0"
 Set-PrivateProfileString $env:windir\System32\ras\router.pbk $VpnS2SInterfaceName "RedialOnLinkFailure" "1"
- 
-### Restart the RRAS service
-Restart-Service RemoteAccess
 
 Set-VpnS2SInterface -CustomPolicy -Name $VpnS2SInterfaceName -AuthenticationMethod PSKOnly -AuthenticationTransformConstants SHA256 -CipherTransformConstants AES256 -DHGroup Group2 -EncryptionMethod AES256 -IntegrityCheckMethod SHA256 -PfsGroup PFS2 -ResponderAuthenticationMethod PSKOnly
+
+### Restart the RRAS service
+Restart-Service RemoteAccess
 
  
 ### Dial-in to Azure gateway
